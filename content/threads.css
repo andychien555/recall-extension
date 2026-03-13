@@ -1,0 +1,64 @@
+/* Recall - Threads Content Script Styles */
+/* 符合 Threads 原生按鈕樣式 */
+
+.recall-save-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+  border: none;
+  border-radius: 50%;
+  background-color: transparent;
+  color: inherit;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+  outline: none;
+}
+
+.recall-save-btn:hover {
+  background-color: rgba(0, 0, 0, 0.05);
+}
+
+.recall-save-btn:active {
+  transform: scale(0.95);
+}
+
+.recall-save-btn[data-disabled="true"] {
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.recall-save-btn svg {
+  color: inherit;
+  transition: color 0.2s ease;
+}
+
+/* 成功動畫 */
+@keyframes recall-pulse {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.15); }
+  100% { transform: scale(1); }
+}
+
+/* 錯誤提示淡入 */
+@keyframes recall-fade-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(4px); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+.recall-save-btn svg[style*="color: rgb(0, 200, 83)"] {
+  animation: recall-pulse 0.3s ease;
+}
+
+/* 深色模式 */
+@media (prefers-color-scheme: dark) {
+  .recall-save-btn:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+  }
+}
+
+/* Threads 深色模式 */
+html[style*="color-scheme: dark"] .recall-save-btn:hover,
+[data-theme="dark"] .recall-save-btn:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+}

@@ -1,0 +1,14 @@
+{
+  "name": "recall-extension",
+  "version": "0.1.0",
+  "description": "一鍵儲存 Threads 貼文為本機 .md 檔案",
+  "scripts": {
+    "generate-icons": "node scripts/generate-icons.js"
+  },
+  "keywords": ["chrome-extension", "threads", "bookmarks", "markdown"],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "canvas": "^3.2.1"
+  }
+}
