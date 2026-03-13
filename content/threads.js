@@ -459,16 +459,8 @@
         return width > 150 || height > 150;
       };
 
-      // 在 postElement 附近搜尋（用 DOM 結構而非位置）
-      // 往上找到更大的容器
-      let searchContainer = postElement;
-      for (let i = 0; i < 8; i++) {
-        if (searchContainer.parentElement) {
-          searchContainer = searchContainer.parentElement;
-        }
-      }
-
-      const allImgs = searchContainer.querySelectorAll('img');
+      // 只在 postElement 內搜尋圖片，避免抓到其他貼文的圖片
+      const allImgs = postElement.querySelectorAll('img');
       log(`搜尋容器內有 ${allImgs.length} 張圖片`);
 
       const contentImages = Array.from(allImgs).filter(img => {
@@ -828,11 +820,69 @@
   }
 
   /**
+   * 顯示 Toast Modal
+   */
+  function showToast(type, message) {
+    // 移除現有的 toast
+    const existingToast = document.querySelector('.recall-toast-modal');
+    if (existingToast) existingToast.remove();
+
+    const toast = document.createElement('div');
+    toast.className = 'recall-toast-modal';
+
+    const isSuccess = type === 'success';
+    const iconColor = isSuccess ? '#00c853' : '#ff1744';
+    const icon = isSuccess ? '✓' : '✕';
+
+    toast.innerHTML = `
+      <span style="font-size: 24px; margin-right: 12px; color: ${iconColor};">${icon}</span>
+      <span style="font-size: 16px; font-weight: 500; color: white;">${message}</span>
+    `;
+
+    toast.style.cssText = `
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%) scale(0.8);
+      background: #333;
+      color: white;
+      padding: 20px 32px;
+      border-radius: 12px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 999999;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+      opacity: 0;
+      transition: all 0.2s ease-out;
+    `;
+
+    document.body.appendChild(toast);
+
+    // 觸發動畫
+    requestAnimationFrame(() => {
+      toast.style.opacity = '1';
+      toast.style.transform = 'translate(-50%, -50%) scale(1)';
+    });
+
+    // 1 秒後自動消失
+    setTimeout(() => {
+      toast.style.opacity = '0';
+      toast.style.transform = 'translate(-50%, -50%) scale(0.8)';
+      setTimeout(() => toast.remove(), 200);
+    }, 1000);
+  }
+
+  /**
    * 顯示成功狀態
    */
   function showSuccess(btn, inner, isCommentBtn = false) {
     inner.innerHTML = getCheckIcon();
     inner.querySelector('svg').style.color = '#00c853';
+
+    // 顯示 Toast Modal
+    showToast('success', '已儲存到 Recall！');
 
     setTimeout(() => {
       inner.innerHTML = isCommentBtn ? getCommentIcon() : getSaveIcon();
@@ -848,34 +898,14 @@
     inner.innerHTML = getErrorIcon();
     inner.querySelector('svg').style.color = '#ff1744';
 
-    const tooltip = document.createElement('div');
-    tooltip.className = 'recall-error-tooltip';
-    tooltip.textContent = errorMessage || '儲存失敗';
-    tooltip.style.cssText = `
-      position: absolute;
-      bottom: 100%;
-      left: 50%;
-      transform: translateX(-50%);
-      background: #ff1744;
-      color: white;
-      padding: 6px 10px;
-      border-radius: 6px;
-      font-size: 12px;
-      white-space: nowrap;
-      z-index: 9999;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.2);
-      animation: recall-fade-in 0.2s ease;
-    `;
-
-    btn.style.position = 'relative';
-    btn.appendChild(tooltip);
+    // 顯示 Toast Modal
+    showToast('error', errorMessage || '儲存失敗');
 
     setTimeout(() => {
-      tooltip.remove();
       inner.innerHTML = isCommentBtn ? getCommentIcon() : getSaveIcon();
       btn.dataset.disabled = 'false';
       btn.title = isCommentBtn ? SAVE_WITH_COMMENTS_TOOLTIP : SAVE_TOOLTIP;
-    }, 3000);
+    }, 2000);
   }
 
   /**
