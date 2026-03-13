@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Recall",
   "description": "一鍵儲存 Threads 貼文為本機 .md 檔案",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "permissions": [
     "downloads",
     "storage"
@@ -42,5 +42,11 @@
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
-  }
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["images/*.png"],
+      "matches": ["https://www.threads.net/*", "https://www.threads.com/*", "https://threads.net/*", "https://threads.com/*"]
+    }
+  ]
 }

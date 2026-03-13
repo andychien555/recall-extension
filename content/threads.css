@@ -40,6 +40,12 @@
   100% { transform: scale(1); }
 }
 
+/* Loading spinner 動畫 */
+@keyframes recall-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
 /* 錯誤提示淡入 */
 @keyframes recall-fade-in {
   from { opacity: 0; transform: translateX(-50%) translateY(4px); }

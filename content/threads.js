@@ -7,10 +7,28 @@
   const BUTTON_CLASS = 'recall-save-btn';
   const PROCESSED_ATTR = 'data-recall-processed';
   const DEBUG = true;
-  const ORIGINAL_TOOLTIP = '儲存到 Recall\nShift+點擊: 含回覆（請先滾動載入所有回覆）';
+  const SAVE_TOOLTIP = '儲存貼文到 Recall';
+  const SAVE_WITH_COMMENTS_TOOLTIP = '儲存貼文 + 所有留言\n（自動滾動載入）';
+  const AUTO_SCROLL_WAIT_MS = 800;
+  const AUTO_SCROLL_TIMEOUT_MS = 5000; // 5 秒（測試用）
+  const SCROLL_INCREMENT_PX = 800;
+
+  /**
+   * 檢查是否在單篇貼文頁面
+   */
+  function isSinglePostPage() {
+    return /^https:\/\/(www\.)?threads\.(net|com)\/@[\w.]+\/post\/[\w-]+/.test(window.location.href);
+  }
+
+  /**
+   * 等待指定毫秒
+   */
+  function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
 
   function log(...args) {
-    if (DEBUG) console.log('[Recall]', ...args);
+    if (DEBUG) console.log('[Recall v2.0]', ...args);
   }
 
   // 等待頁面載入完成
@@ -115,26 +133,32 @@
    */
   function injectButton(actionBar) {
     const postElement = findPostElement(actionBar);
-    const btn = createNativeStyleButton(postElement);
-    actionBar.appendChild(btn);
+
+    // 按鈕 1：儲存貼文（現有功能）
+    const saveBtn = createSaveButton(postElement);
+    actionBar.appendChild(saveBtn);
+
+    // 按鈕 2：儲存含留言（只在單篇頁面顯示）
+    if (isSinglePostPage()) {
+      const saveWithCommentsBtn = createSaveWithCommentsButton(postElement);
+      actionBar.appendChild(saveWithCommentsBtn);
+    }
   }
 
   /**
-   * 建立符合 Threads 原生樣式的按鈕
+   * 建立儲存貼文按鈕
    */
-  function createNativeStyleButton(postElement) {
-    // 外層容器（跟其他按鈕一樣的結構）
+  function createSaveButton(postElement) {
     const wrapper = document.createElement('div');
     wrapper.className = 'x6s0dn4 x78zum5 xl56j7k';
     wrapper.style.marginLeft = '4px';
 
-    // 按鈕元素
     const btn = document.createElement('div');
     btn.className = BUTTON_CLASS;
     btn.setAttribute('role', 'button');
     btn.setAttribute('tabindex', '0');
     btn.setAttribute('aria-label', '儲存到 Recall');
-    btn.title = ORIGINAL_TOOLTIP;
+    btn.title = SAVE_TOOLTIP;
     btn.style.cssText = `
       display: flex;
       align-items: center;
@@ -145,7 +169,6 @@
       transition: background-color 0.2s;
     `;
 
-    // 內層容器
     const inner = document.createElement('div');
     inner.style.cssText = 'display: flex; align-items: center;';
     inner.innerHTML = getSaveIcon();
@@ -153,7 +176,6 @@
     btn.appendChild(inner);
     wrapper.appendChild(btn);
 
-    // Hover 效果
     btn.addEventListener('mouseenter', () => {
       btn.style.backgroundColor = 'rgba(0, 0, 0, 0.05)';
     });
@@ -161,7 +183,6 @@
       btn.style.backgroundColor = 'transparent';
     });
 
-    // 點擊事件
     btn.addEventListener('click', async (e) => {
       e.preventDefault();
       e.stopPropagation();
@@ -170,16 +191,7 @@
       btn.dataset.disabled = 'true';
 
       try {
-        let postData;
-
-        // Shift+click: 儲存貼文和所有回覆
-        if (e.shiftKey) {
-          log('Shift+click: 儲存貼文和回覆');
-          postData = extractPostWithReplies(postElement);
-        } else {
-          postData = extractPost(postElement);
-        }
-
+        const postData = extractPost(postElement);
         log('提取的貼文資料:', postData);
         await savePost(postData);
         showSuccess(btn, inner);
@@ -189,7 +201,74 @@
       }
     });
 
-    // 鍵盤支援
+    btn.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        btn.click();
+      }
+    });
+
+    return wrapper;
+  }
+
+  /**
+   * 建立儲存含留言按鈕
+   */
+  function createSaveWithCommentsButton(postElement) {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'x6s0dn4 x78zum5 xl56j7k';
+    wrapper.style.marginLeft = '4px';
+
+    const btn = document.createElement('div');
+    btn.className = BUTTON_CLASS;
+    btn.setAttribute('role', 'button');
+    btn.setAttribute('tabindex', '0');
+    btn.setAttribute('aria-label', '儲存貼文含留言');
+    btn.title = SAVE_WITH_COMMENTS_TOOLTIP;
+    btn.style.cssText = `
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 8px;
+      cursor: pointer;
+      border-radius: 50%;
+      transition: background-color 0.2s;
+    `;
+
+    const inner = document.createElement('div');
+    inner.style.cssText = 'display: flex; align-items: center;';
+    inner.innerHTML = getCommentIcon();
+
+    btn.appendChild(inner);
+    wrapper.appendChild(btn);
+
+    btn.addEventListener('mouseenter', () => {
+      btn.style.backgroundColor = 'rgba(0, 0, 0, 0.05)';
+    });
+    btn.addEventListener('mouseleave', () => {
+      btn.style.backgroundColor = 'transparent';
+    });
+
+    btn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      if (btn.dataset.disabled === 'true') return;
+      btn.dataset.disabled = 'true';
+
+      try {
+        const { comments, timedOut } = await autoScrollAndCollectComments(postElement, btn, inner);
+        const postData = buildPostWithComments(postElement, comments, timedOut);
+
+        log('提取的貼文資料（含留言）:', postData);
+        await savePost(postData);
+        showSuccess(btn, inner, true);
+      } catch (error) {
+        console.error('Recall: 儲存失敗', error);
+        showError(btn, inner, error.message, true);
+      }
+    });
+
     btn.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' || e.key === ' ') {
         e.preventDefault();
@@ -295,17 +374,59 @@
       return clone.textContent.trim().substring(0, 5000);
     }) || '';
 
-    // 提取圖片
+    // 提取圖片（過濾頭像，保留內容圖片）
     const images = safeExtractAll(() => {
-      const imgs = postElement.querySelectorAll('img[src*="cdninstagram"], img[src*="scontent"], img[src*="fbcdn"]');
-      return Array.from(imgs)
-        .map(img => img.src)
-        .filter(src => {
-          return !src.includes('150x150') &&
-                 !src.includes('44x44') &&
-                 !src.includes('32x32') &&
-                 !src.includes('profile');
-        });
+      // 判斷是否為內容圖片（非頭像）
+      const isContentImage = (img) => {
+        const src = img.src || '';
+        // 排除擴充功能自己的圖片
+        if (src.startsWith('chrome-extension://')) return false;
+        // 排除 data URL（通常是 icon）
+        if (src.startsWith('data:')) return false;
+        // 排除明顯的頭像 URL
+        if (src.includes('44x44') || src.includes('32x32')) return false;
+        if (src.includes('profile') || src.includes('avatar')) return false;
+        // 檢查 URL 路徑：t51.82787-19 是 IG 頭像，t51.29350-15 是內容圖
+        if (src.includes('t51.82787-19')) return false; // 頭像
+        // 只保留 CDN 圖片
+        if (!src.includes('cdninstagram') && !src.includes('scontent') && !src.includes('fbcdn')) {
+          return false;
+        }
+        // 檢查尺寸
+        const width = img.naturalWidth || img.width || 0;
+        const height = img.naturalHeight || img.height || 0;
+        // 150x150 正方形很可能是頭像
+        if (width === 150 && height === 150) return false;
+        if (width === height && width <= 150) return false;
+        // 如果尺寸未知但 URL 看起來像內容圖
+        if (width === 0 && height === 0) {
+          return src.includes('t51.29350-15') || src.includes('t51.2885-15');
+        }
+        return width > 150 || height > 150;
+      };
+
+      // 在 postElement 附近搜尋（用 DOM 結構而非位置）
+      // 往上找到更大的容器
+      let searchContainer = postElement;
+      for (let i = 0; i < 8; i++) {
+        if (searchContainer.parentElement) {
+          searchContainer = searchContainer.parentElement;
+        }
+      }
+
+      const allImgs = searchContainer.querySelectorAll('img');
+      log(`搜尋容器內有 ${allImgs.length} 張圖片`);
+
+      const contentImages = Array.from(allImgs).filter(img => {
+        const isContent = isContentImage(img);
+        if (isContent) {
+          log(`✓ 內容圖片: ${img.src.substring(0, 100)}...`);
+        }
+        return isContent;
+      });
+
+      log(`找到 ${contentImages.length} 張內容圖片`);
+      return contentImages.map(img => img.src);
     }) || [];
 
     // 提取貼文連結
@@ -326,40 +447,6 @@
       url,
       platform: 'Threads',
       savedAt: new Date().toISOString()
-    };
-  }
-
-  /**
-   * 提取貼文和所有回覆
-   */
-  function extractPostWithReplies(postElement) {
-    // 先提取主貼文
-    const mainPost = extractPost(postElement);
-
-    // 找到所有回覆
-    const replies = findReplies(postElement);
-    log(`找到 ${replies.length} 則回覆`);
-
-    if (replies.length === 0) {
-      return mainPost;
-    }
-
-    // 組合主貼文和回覆內容
-    let combinedContent = mainPost.content;
-    const allImages = [...mainPost.images];
-
-    replies.forEach((reply) => {
-      const replyData = extractPost(reply);
-      combinedContent += `\n\n---\n\n**${replyData.author} 回覆：**\n\n${replyData.content}`;
-      allImages.push(...replyData.images);
-    });
-
-    return {
-      ...mainPost,
-      content: combinedContent,
-      images: [...new Set(allImages)], // 去重
-      hasReplies: true,
-      replyCount: replies.length
     };
   }
 
@@ -455,49 +542,258 @@
   }
 
   /**
+   * 自動滾動並收集所有留言
+   */
+  async function autoScrollAndCollectComments(postElement, btn, inner) {
+    const originalScrollY = window.scrollY;
+    inner.innerHTML = getLoadingIcon();
+
+    const startTime = Date.now();
+    const seenComments = new Map();
+    let consecutiveNoNew = 0;
+    let timedOut = false;
+
+    try {
+      log('開始收集留言，postElement:', postElement);
+      collectVisibleComments(postElement, seenComments);
+      log(`初始收集完成，找到 ${seenComments.size} 則留言`);
+
+      while (consecutiveNoNew < 3) {
+        if (Date.now() - startTime > AUTO_SCROLL_TIMEOUT_MS) {
+          timedOut = true;
+          log('自動滾動超時');
+          break;
+        }
+
+        const atBottom = scrollDown();
+        await sleep(AUTO_SCROLL_WAIT_MS);
+
+        const prevCount = seenComments.size;
+        collectVisibleComments(postElement, seenComments);
+
+        btn.title = `正在載入... 已找到 ${seenComments.size} 則留言`;
+        log(`目前留言數: ${seenComments.size}, 連續無新留言: ${consecutiveNoNew}, 是否到底: ${atBottom}`);
+
+        if (seenComments.size === prevCount) {
+          consecutiveNoNew++;
+          if (atBottom) {
+            log('已到達頁面底部');
+            break;
+          }
+        } else {
+          consecutiveNoNew = 0;
+        }
+      }
+
+      window.scrollTo({ top: originalScrollY, behavior: 'smooth' });
+
+      const comments = Array.from(seenComments.values());
+      log(`自動滾動完成，共收集 ${comments.length} 則留言`);
+      return { comments, timedOut };
+
+    } catch (error) {
+      window.scrollTo({ top: originalScrollY, behavior: 'smooth' });
+      throw error;
+    }
+  }
+
+  /**
+   * 向下滾動頁面
+   */
+  function scrollDown() {
+    const maxScroll = document.documentElement.scrollHeight - window.innerHeight;
+    const currentScroll = window.scrollY;
+    const newScroll = Math.min(currentScroll + SCROLL_INCREMENT_PX, maxScroll);
+    log(`滾動: ${currentScroll} -> ${newScroll} (max: ${maxScroll})`);
+    window.scrollTo({ top: newScroll, behavior: 'smooth' });
+    return newScroll >= maxScroll - 10;
+  }
+
+  /**
+   * 收集目前可見的留言（使用現有的 findReplies 邏輯）
+   */
+  function collectVisibleComments(postElement, seenComments) {
+    // 直接使用已經測試過的 findReplies 函式
+    const replyElements = findReplies(postElement);
+    log(`collectVisibleComments: 找到 ${replyElements.length} 個回覆元素`);
+
+    replyElements.forEach((container) => {
+      const commentData = extractCommentData(container);
+      if (!commentData) {
+        return;
+      }
+
+      const dedupeKey = `${commentData.author}::${commentData.content.substring(0, 100)}`;
+      if (!seenComments.has(dedupeKey)) {
+        seenComments.set(dedupeKey, commentData);
+        log(`新增留言: ${commentData.author}`);
+      }
+    });
+  }
+
+  /**
+   * 提取留言資料
+   */
+  function extractCommentData(container) {
+    const author = safeExtract(() => {
+      const link = container.querySelector('a[href^="/@"]');
+      const match = link?.getAttribute('href')?.match(/\/@([^/?]+)/);
+      return match ? '@' + match[1] : null;
+    });
+    if (!author) return null;
+
+    const content = safeExtract(() => {
+      const blocks = container.querySelectorAll('div[dir="auto"], span[dir="auto"]');
+      const parts = [];
+      const seen = new Set();
+
+      blocks.forEach(block => {
+        if (block.closest('a[href^="/@"]') || block.closest('[role="button"]') ||
+            block.closest('button') || block.closest('time')) return;
+
+        const text = block.textContent.trim();
+        if (text.length < 2 || text === 'Translate' || text === '翻譯' || text === '查看翻譯') return;
+
+        const isChild = Array.from(blocks).some(o => o !== block && o.contains(block));
+        if (isChild) return;
+
+        if (!seen.has(text)) {
+          seen.add(text);
+          parts.push(text);
+        }
+      });
+      return parts.join('\n');
+    }) || '';
+
+    const timestamp = safeExtract(() => {
+      const time = container.querySelector('time');
+      return time?.getAttribute('datetime') || time?.textContent?.trim() || null;
+    });
+
+    // 提取留言中的圖片
+    const images = safeExtractAll(() => {
+      const imgs = container.querySelectorAll('img');
+      return Array.from(imgs)
+        .filter(img => {
+          const src = img.src || '';
+          if (src.startsWith('chrome-extension://')) return false;
+          if (src.startsWith('data:')) return false;
+          if (src.includes('44x44') || src.includes('32x32')) return false;
+          if (src.includes('profile') || src.includes('avatar')) return false;
+          if (src.includes('t51.82787-19')) return false;
+          if (!src.includes('cdninstagram') && !src.includes('scontent') && !src.includes('fbcdn')) {
+            return false;
+          }
+          const width = img.naturalWidth || img.width || 0;
+          const height = img.naturalHeight || img.height || 0;
+          if (width === 150 && height === 150) return false;
+          if (width === height && width <= 150) return false;
+          if (width === 0 && height === 0) {
+            return src.includes('t51.29350-15') || src.includes('t51.2885-15');
+          }
+          return width > 150 || height > 150;
+        })
+        .map(img => img.src);
+    }) || [];
+
+    return { author, content, timestamp, images };
+  }
+
+  /**
+   * 組合貼文與留言
+   */
+  function buildPostWithComments(postElement, comments, timedOut) {
+    const mainPost = extractPost(postElement);
+
+    if (comments.length === 0) {
+      mainPost.content += '\n\n---\n\n## 留言\n\n此貼文目前無留言';
+      return mainPost;
+    }
+
+    let commentSection = `\n\n---\n\n## 留言（共 ${comments.length} 則）`;
+
+    if (timedOut) {
+      commentSection += '\n\n> ⚠️ 留言可能未完整載入（已達時間限制）';
+    }
+
+    comments.forEach(comment => {
+      const timeStr = comment.timestamp ? ` · ${comment.timestamp}` : '';
+      commentSection += `\n\n**${comment.author}**${timeStr}\n${comment.content}`;
+
+      // 加入該留言的圖片
+      if (comment.images && comment.images.length > 0) {
+        commentSection += '\n';
+        comment.images.forEach((imgUrl, idx) => {
+          commentSection += `\n![${comment.author} 圖片${idx + 1}](${imgUrl})`;
+        });
+      }
+    });
+
+    return {
+      ...mainPost,
+      content: mainPost.content + commentSection,
+      hasReplies: true,
+      replyCount: comments.length
+    };
+  }
+
+  /**
    * 發送儲存請求到 background
    */
   function savePost(postData) {
     return new Promise((resolve, reject) => {
-      chrome.runtime.sendMessage(
-        { type: 'SAVE_POST', data: postData },
-        (response) => {
-          if (chrome.runtime.lastError) {
-            reject(new Error(chrome.runtime.lastError.message));
-            return;
-          }
-          if (response && response.success) {
-            resolve();
-          } else {
-            reject(new Error(response?.error || 'Unknown error'));
-          }
+      try {
+        if (!chrome.runtime?.sendMessage) {
+          reject(new Error('請重新整理頁面 (Cmd+Shift+R)'));
+          return;
         }
-      );
+        chrome.runtime.sendMessage(
+          { type: 'SAVE_POST', data: postData },
+          (response) => {
+            if (chrome.runtime.lastError) {
+              const msg = chrome.runtime.lastError.message || '';
+              if (msg.includes('invalidated') || msg.includes('context')) {
+                reject(new Error('請重新整理頁面 (Cmd+Shift+R)'));
+              } else {
+                reject(new Error(msg));
+              }
+              return;
+            }
+            if (response && response.success) {
+              resolve();
+            } else {
+              reject(new Error(response?.error || 'Unknown error'));
+            }
+          }
+        );
+      } catch (e) {
+        // Extension context invalidated - 擴充功能已重新載入
+        reject(new Error('請重新整理頁面 (Cmd+Shift+R)'));
+      }
     });
   }
 
   /**
    * 顯示成功狀態
    */
-  function showSuccess(btn, inner) {
+  function showSuccess(btn, inner, isCommentBtn = false) {
     inner.innerHTML = getCheckIcon();
     inner.querySelector('svg').style.color = '#00c853';
 
     setTimeout(() => {
-      inner.innerHTML = getSaveIcon();
+      inner.innerHTML = isCommentBtn ? getCommentIcon() : getSaveIcon();
       btn.dataset.disabled = 'false';
-      btn.title = ORIGINAL_TOOLTIP;
+      btn.title = isCommentBtn ? SAVE_WITH_COMMENTS_TOOLTIP : SAVE_TOOLTIP;
     }, 2000);
   }
 
   /**
    * 顯示錯誤狀態
    */
-  function showError(btn, inner, errorMessage) {
+  function showError(btn, inner, errorMessage, isCommentBtn = false) {
     inner.innerHTML = getErrorIcon();
     inner.querySelector('svg').style.color = '#ff1744';
 
-    // 顯示錯誤提示
     const tooltip = document.createElement('div');
     tooltip.className = 'recall-error-tooltip';
     tooltip.textContent = errorMessage || '儲存失敗';
@@ -517,15 +813,14 @@
       animation: recall-fade-in 0.2s ease;
     `;
 
-    // 確保按鈕有相對定位
     btn.style.position = 'relative';
     btn.appendChild(tooltip);
 
     setTimeout(() => {
       tooltip.remove();
-      inner.innerHTML = getSaveIcon();
+      inner.innerHTML = isCommentBtn ? getCommentIcon() : getSaveIcon();
       btn.dataset.disabled = 'false';
-      btn.title = ORIGINAL_TOOLTIP;
+      btn.title = isCommentBtn ? SAVE_WITH_COMMENTS_TOOLTIP : SAVE_TOOLTIP;
     }, 3000);
   }
 
@@ -533,10 +828,8 @@
    * SVG Icons - 符合 Threads 原生樣式
    */
   function getSaveIcon() {
-    return `<svg aria-label="Save" role="img" viewBox="0 0 24 24" style="fill: currentColor; height: 18px; width: 18px;">
-      <title>Save to Recall</title>
-      <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path>
-    </svg>`;
+    const imgUrl = chrome.runtime.getURL('images/white-cat-paw.png');
+    return `<img src="${imgUrl}" alt="Save to Recall" style="height: 24px; width: 24px; object-fit: contain;">`;
   }
 
   function getCheckIcon() {
@@ -553,6 +846,17 @@
       <line x1="15" y1="9" x2="9" y2="15" stroke="currentColor" stroke-width="2" stroke-linecap="round"></line>
       <line x1="9" y1="9" x2="15" y2="15" stroke="currentColor" stroke-width="2" stroke-linecap="round"></line>
     </svg>`;
+  }
+
+  function getLoadingIcon() {
+    return `<svg aria-label="Loading" viewBox="0 0 24 24" style="fill: none; stroke: currentColor; height: 18px; width: 18px; animation: recall-spin 1s linear infinite;">
+      <circle cx="12" cy="12" r="10" stroke-width="2" stroke-dasharray="31.4 31.4" stroke-linecap="round"/>
+    </svg>`;
+  }
+
+  function getCommentIcon() {
+    const imgUrl = chrome.runtime.getURL('images/leopard-paw.png');
+    return `<img src="${imgUrl}" alt="Save with comments" style="height: 24px; width: 24px; object-fit: contain;">`;
   }
 
   /**

@@ -31,31 +31,12 @@ async function savePost(postData) {
 
   const date = new Date(savedAt);
 
-  // 生成檔名：使用內文前 50 字元
-  const filename = generateFilename(content, author, date);
+  // 生成檔名：使用內文
+  const filename = generateFilename(content, author);
   const baseName = filename.replace('.md', '');
 
-  // 下載圖片並取得本地路徑
-  const localImages = [];
-  if (images && images.length > 0) {
-    for (let i = 0; i < images.length; i++) {
-      const imgUrl = images[i];
-      const imgFilename = `${baseName}-img${i + 1}.jpg`;
-      try {
-        await chrome.downloads.download({
-          url: imgUrl,
-          filename: `bookmarks/images/${imgFilename}`,
-          saveAs: false,
-          conflictAction: 'uniquify'
-        });
-        localImages.push(`images/${imgFilename}`);
-      } catch (e) {
-        console.error('圖片下載失敗:', imgUrl, e);
-        // 保留原始 URL 作為備用
-        localImages.push(imgUrl);
-      }
-    }
-  }
+  // 使用原始圖片 URL（暫不下載到本地）
+  const localImages = images || [];
 
   // 組合 .md 內容（使用本地圖片路徑）
   const mdContent = generateMarkdown({ ...postData, localImages }, date);
@@ -78,7 +59,7 @@ async function savePost(postData) {
 /**
  * 生成檔名（使用內文）
  */
-function generateFilename(content, author, date) {
+function generateFilename(content, author) {
   // 清理內文作為檔名
   let name = content
     // 移除換行符號
@@ -96,8 +77,8 @@ function generateFilename(content, author, date) {
     name = author.replace('@', '') || 'untitled';
   }
 
-  // 截斷長度（保留 50 字元給內文，預留空間給時間戳和 .md）
-  const maxLength = 50;
+  // 截斷長度（最多 60 字元）
+  const maxLength = 60;
   if (name.length > maxLength) {
     name = name.substring(0, maxLength).trim();
     // 避免在詞中間截斷（嘗試在空格處截斷）
@@ -107,10 +88,7 @@ function generateFilename(content, author, date) {
     }
   }
 
-  // 加上時間戳避免重複（格式：HHmmss）
-  const timeStr = formatTime(date);
-
-  return `${name}-${timeStr}.md`;
+  return `${name}.md`;
 }
 
 /**
@@ -152,16 +130,6 @@ function formatDate(date) {
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const day = String(date.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
-}
-
-/**
- * 時間格式化：HHmmss
- */
-function formatTime(date) {
-  const hours = String(date.getHours()).padStart(2, '0');
-  const minutes = String(date.getMinutes()).padStart(2, '0');
-  const seconds = String(date.getSeconds()).padStart(2, '0');
-  return `${hours}${minutes}${seconds}`;
 }
 
 /**
