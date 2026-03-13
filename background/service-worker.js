@@ -97,10 +97,9 @@ function generateFilename(content, author) {
 function generateMarkdown(postData, date) {
   const { author, content, images, url, platform, localImages, replyCount } = postData;
 
-  const formattedDate = `${formatDate(date)} ${formatTimeReadable(date)}`;
   const savedTime = `${formatDate(date)} ${formatTimeReadable(date)}:${String(date.getSeconds()).padStart(2, '0')}`;
 
-  let md = `# ${author} — ${formattedDate}\n\n`;
+  let md = `# ${author}\n\n`;
   md += `**來源：** ${url}\n`;
   md += `**平台：** ${platform}\n`;
   md += `**儲存時間：** ${savedTime}\n`;

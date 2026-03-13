@@ -27,6 +27,37 @@
     return new Promise(resolve => setTimeout(resolve, ms));
   }
 
+  /**
+   * 將圖片 URL 轉換為 base64
+   */
+  async function imageToBase64(imgUrl) {
+    try {
+      const response = await fetch(imgUrl);
+      const blob = await response.blob();
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+    } catch (e) {
+      log(`圖片轉換失敗: ${imgUrl}`, e);
+      return null;
+    }
+  }
+
+  /**
+   * 批次轉換圖片為 base64
+   */
+  async function convertImagesToBase64(imageUrls) {
+    const results = [];
+    for (const url of imageUrls) {
+      const base64 = await imageToBase64(url);
+      results.push(base64 || url); // 失敗時保留原始 URL
+    }
+    return results;
+  }
+
   function log(...args) {
     if (DEBUG) console.log('[Recall v2.0]', ...args);
   }
@@ -191,7 +222,15 @@
       btn.dataset.disabled = 'true';
 
       try {
+        inner.innerHTML = getLoadingIcon();
         const postData = extractPost(postElement);
+
+        // 轉換圖片為 base64
+        if (postData.images && postData.images.length > 0) {
+          btn.title = '正在轉換圖片...';
+          postData.images = await convertImagesToBase64(postData.images);
+        }
+
         log('提取的貼文資料:', postData);
         await savePost(postData);
         showSuccess(btn, inner);
@@ -258,7 +297,22 @@
 
       try {
         const { comments, timedOut } = await autoScrollAndCollectComments(postElement, btn, inner);
+
+        // 轉換留言中的圖片為 base64
+        btn.title = '正在轉換圖片...';
+        inner.innerHTML = getLoadingIcon();
+        for (const comment of comments) {
+          if (comment.images && comment.images.length > 0) {
+            comment.images = await convertImagesToBase64(comment.images);
+          }
+        }
+
         const postData = buildPostWithComments(postElement, comments, timedOut);
+
+        // 轉換主貼文圖片為 base64
+        if (postData.images && postData.images.length > 0) {
+          postData.images = await convertImagesToBase64(postData.images);
+        }
 
         log('提取的貼文資料（含留言）:', postData);
         await savePost(postData);
