@@ -389,7 +389,10 @@
       const contentParts = [];
       const seenTexts = new Set();
 
-      textBlocks.forEach(block => {
+      // 將 textBlocks 轉為陣列以便檢查父子關係
+      const blocksArray = Array.from(textBlocks);
+
+      blocksArray.forEach(block => {
         // 跳過作者連結、按鈕等
         if (block.closest('a[href^="/@"]') ||
             block.closest('[role="button"]') ||
@@ -405,14 +408,46 @@
         // 跳過「翻譯」按鈕文字
         if (text === 'Translate' || text === '翻譯' || text === '查看翻譯' || text === 'See translation') return;
 
-        // 檢查是否是子元素的重複內容
-        const isChild = Array.from(textBlocks).some(other =>
+        // 跳過包含 base64 資料的文字（可能是圖片 alt 文字）
+        if (/[A-Za-z0-9+/=]{50,}/.test(text)) return;
+
+        // 檢查是否是子元素的重複內容（被其他 block 包含）
+        const isChild = blocksArray.some(other =>
           other !== block && other.contains(block)
         );
         if (isChild) return;
 
-        // 避免重複
-        if (!seenTexts.has(text)) {
+        // 檢查是否是父元素（包含其他 block）- 優先使用子元素的文字
+        const isParent = blocksArray.some(other =>
+          other !== block && block.contains(other) &&
+          !other.closest('a[href^="/@"]') &&
+          !other.closest('[role="button"]') &&
+          !other.closest('button') &&
+          !other.closest('time') &&
+          other.textContent.trim().length >= 5
+        );
+        if (isParent) return;
+
+        // 避免完全重複
+        if (seenTexts.has(text)) return;
+
+        // 避免子字串重複（新文字是已存在文字的一部分，或已存在文字是新文字的一部分）
+        let isSubstring = false;
+        for (const existingText of seenTexts) {
+          if (existingText.includes(text) || text.includes(existingText)) {
+            // 保留較長的那個
+            if (text.length > existingText.length) {
+              seenTexts.delete(existingText);
+              const idx = contentParts.indexOf(existingText);
+              if (idx > -1) contentParts.splice(idx, 1);
+            } else {
+              isSubstring = true;
+            }
+            break;
+          }
+        }
+
+        if (!isSubstring) {
           seenTexts.add(text);
           contentParts.push(text);
         }
@@ -472,7 +507,10 @@
       });
 
       log(`找到 ${contentImages.length} 張內容圖片`);
-      return contentImages.map(img => img.src);
+      // 使用 Set 去重圖片 URL
+      const uniqueUrls = [...new Set(contentImages.map(img => img.src))];
+      log(`去重後 ${uniqueUrls.length} 張圖片`);
+      return uniqueUrls;
     }) || [];
 
     // 提取貼文連結
@@ -503,6 +541,16 @@
     const replies = [];
     const seenElements = new Set();
     seenElements.add(postElement);
+
+    // 檢查容器是否與已加入的元素重疊
+    const isOverlapping = (container) => {
+      for (const seen of seenElements) {
+        if (seen.contains(container) || container.contains(seen)) {
+          return true;
+        }
+      }
+      return false;
+    };
 
     // 取得主貼文的 URL 來識別它
     const mainPostUrl = postElement.querySelector('a[href*="/post/"]')?.getAttribute('href');
@@ -538,8 +586,8 @@
             break;
           }
 
-          // 檢查是否已經加入
-          if (!seenElements.has(container)) {
+          // 檢查是否已經加入或與已加入的元素重疊
+          if (!seenElements.has(container) && !isOverlapping(container)) {
             // 再確認一下不是主貼文（比對 URL）
             const containerPostUrl = container.querySelector('a[href*="/post/"]')?.getAttribute('href');
             if (containerPostUrl && containerPostUrl === mainPostUrl) {
@@ -573,7 +621,8 @@
           const hasLike = container.querySelector('svg[aria-label="Like"], svg[aria-label="讚"], svg[aria-label="Unlike"], svg[aria-label="收回讚"]');
 
           if (hasAuthor && hasLike && container.offsetHeight > 60) {
-            if (!seenElements.has(container) && !postElement.contains(container)) {
+            // 檢查是否與已加入的元素重疊
+            if (!seenElements.has(container) && !isOverlapping(container) && !postElement.contains(container)) {
               seenElements.add(container);
               replies.push(container);
             }
@@ -690,20 +739,54 @@
 
     const content = safeExtract(() => {
       const blocks = container.querySelectorAll('div[dir="auto"], span[dir="auto"]');
+      const blocksArray = Array.from(blocks);
       const parts = [];
       const seen = new Set();
 
-      blocks.forEach(block => {
+      blocksArray.forEach(block => {
         if (block.closest('a[href^="/@"]') || block.closest('[role="button"]') ||
             block.closest('button') || block.closest('time')) return;
 
         const text = block.textContent.trim();
         if (text.length < 2 || text === 'Translate' || text === '翻譯' || text === '查看翻譯') return;
 
-        const isChild = Array.from(blocks).some(o => o !== block && o.contains(block));
+        // 跳過包含 base64 資料的文字
+        if (/[A-Za-z0-9+/=]{50,}/.test(text)) return;
+
+        // 檢查是否是子元素（被其他 block 包含）
+        const isChild = blocksArray.some(o => o !== block && o.contains(block));
         if (isChild) return;
 
-        if (!seen.has(text)) {
+        // 檢查是否是父元素（包含其他有效 block）- 優先使用子元素
+        const isParent = blocksArray.some(o =>
+          o !== block && block.contains(o) &&
+          !o.closest('a[href^="/@"]') &&
+          !o.closest('[role="button"]') &&
+          !o.closest('button') &&
+          !o.closest('time') &&
+          o.textContent.trim().length >= 2
+        );
+        if (isParent) return;
+
+        // 避免完全重複
+        if (seen.has(text)) return;
+
+        // 避免子字串重複
+        let isSubstring = false;
+        for (const existingText of seen) {
+          if (existingText.includes(text) || text.includes(existingText)) {
+            if (text.length > existingText.length) {
+              seen.delete(existingText);
+              const idx = parts.indexOf(existingText);
+              if (idx > -1) parts.splice(idx, 1);
+            } else {
+              isSubstring = true;
+            }
+            break;
+          }
+        }
+
+        if (!isSubstring) {
           seen.add(text);
           parts.push(text);
         }
@@ -719,7 +802,7 @@
     // 提取留言中的圖片
     const images = safeExtractAll(() => {
       const imgs = container.querySelectorAll('img');
-      return Array.from(imgs)
+      const filteredImgs = Array.from(imgs)
         .filter(img => {
           const src = img.src || '';
           if (src.startsWith('chrome-extension://')) return false;
@@ -740,6 +823,8 @@
           return width > 150 || height > 150;
         })
         .map(img => img.src);
+      // 使用 Set 去重圖片 URL
+      return [...new Set(filteredImgs)];
     }) || [];
 
     return { author, content, timestamp, images };
